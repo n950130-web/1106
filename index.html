@@ -57,11 +57,12 @@
     {id:'f',title:'採買週末早餐食材',kind:'task',date:dateKey(plusDays(today,2)),time:'',priority:'low',reminder:'',done:false},
     {id:'g',title:'完成提案初稿',kind:'task',date:dateKey(plusDays(today,4)),time:'',priority:'high',reminder:'',done:false}
   ];
-  let items; try {items=JSON.parse(localStorage.getItem('daywell-items')) ?? sample}catch{items=sample}
+  let items=sample; // Loaded per-user from Cloud Firestore after authentication.
   let settings;try{settings=JSON.parse(localStorage.getItem('daywell-settings'))??{weekly:true,defaultTime:'09:00'}}catch{settings={weekly:true,defaultTime:'09:00'}}
+  let persistItems=()=>Promise.resolve();
   let activeView='today',selectedType='task',selectedPriority='high',weekOffset=0,selectedDate=new Date(today);
   const priorityName={urgent:'緊急',high:'高優先',medium:'中優先',low:'低優先'};
-  const save=()=>localStorage.setItem('daywell-items',JSON.stringify(items));
+  const save=()=>{persistItems();}; // Persist each user-scoped mutation to Cloud Firestore.
   function initializeDate(){document.getElementById('dateChip').textContent=new Intl.DateTimeFormat('zh-TW',{year:'numeric',month:'long',day:'numeric',weekday:'long'}).format(selectedDate);document.getElementById('selectedDate').value=dateKey(selectedDate);const h=new Date().getHours();document.getElementById('greetingText').textContent=h<12?'GOOD MORNING':h<18?'GOOD AFTERNOON':'GOOD EVENING'}
   function renderCalendar(){const base=plusDays(selectedDate,weekOffset*7);const mon=plusDays(base,-((base.getDay()+6)%7));document.getElementById('weekLabel').textContent=`${fmt(mon)} – ${fmt(plusDays(mon,6))}`;const days=document.getElementById('weekDays');days.innerHTML='';for(let i=0;i<7;i++){const d=plusDays(mon,i),el=document.createElement('div');el.className='day'+(dateKey(d)===dateKey(today)?' today':'')+(dateKey(d)===dateKey(selectedDate)?' selected':'');el.innerHTML=`<span>${weekday(d).slice(1)}</span><b>${d.getDate()}</b>`;days.append(el)}let start=plusDays(selectedDate,-((selectedDate.getDay()+6)%7));if(weekOffset)start=plusDays(start,weekOffset*7);const weekItems=items.filter(x=>{const d=parseDate(x.date);return d>=start&&d<plusDays(start,7)&&x.kind==='task'}),done=weekItems.filter(x=>x.done).length;document.getElementById('progressText').textContent=`${done} / ${weekItems.length}`;document.getElementById('progressBar').style.width=weekItems.length?`${done/weekItems.length*100}%`:'0%';let next=new Date();let delta=(8-next.getDay())%7;if(delta===0&&(next.getHours()>8||next.getHours()===8&&next.getMinutes()>0))delta=7;next.setDate(next.getDate()+delta);next.setHours(8,0,0,0);document.getElementById('nextSummary').textContent=settings.weekly?new Intl.DateTimeFormat('zh-TW',{month:'numeric',day:'numeric',hour:'numeric',minute:'2-digit',hour12:false}).format(next):'已暫停'}
   function itemCard(item){const date=parseDate(item.date),isOverdue=item.kind==='task'&&!item.done&&item.date<dateKey(today),dateText=isOverdue?`逾期 · ${fmt(date)}`:item.date===dateKey(selectedDate)?(item.date===dateKey(today)?'今天':'所選日期'):`${weekday(date)} ${fmt(date)}`;const kindText=item.kind==='event'?'行程':'任務';const metaTime=item.time?` · ${item.time}`:'';return `<article class="item ${item.done?'done':''} ${isOverdue?'overdue':''}" data-id="${item.id}"><button class="check" aria-label="${item.done?'標記未完成':'完成事項'}">${item.done?'✓':''}</button><div class="item-content"><div class="item-title">${escapeHtml(item.title)}</div><div class="item-meta"><span class="type-icon">${item.kind==='event'?'◷':'◦'}</span><span>${kindText} · ${dateText}${metaTime}</span></div></div><span class="priority ${item.priority}">${priorityName[item.priority]}</span><button class="item-menu" aria-label="刪除事項" title="刪除">⋯</button></article>`}
@@ -77,8 +78,8 @@
   document.getElementById('addBtn').onclick=()=>{document.getElementById('itemForm').reset();selectedType='task';selectedPriority='high';document.querySelectorAll('.type-switch button').forEach(b=>b.classList.toggle('active',b.dataset.type==='task'));document.querySelectorAll('.priority-options button').forEach(b=>b.classList.toggle('active',b.dataset.priority==='high'));document.getElementById('dateInput').value=dateKey(today);document.getElementById('reminderStart').value='';document.getElementById('reminderEnd').value='';document.getElementById('timeField').hidden=true;document.getElementById('dateLabel').textContent='截止日期';open('itemOverlay');document.getElementById('titleInput').focus()};
   document.querySelectorAll('.type-switch button').forEach(b=>b.onclick=()=>{selectedType=b.dataset.type;document.querySelectorAll('.type-switch button').forEach(x=>x.classList.toggle('active',x===b));document.getElementById('timeField').hidden=selectedType!=='event';document.getElementById('dateLabel').textContent=selectedType==='event'?'行程日期':'截止日期';document.getElementById('timeInput').required=selectedType==='event'});
   document.querySelectorAll('.priority-options button').forEach(b=>b.onclick=()=>{selectedPriority=b.dataset.priority;document.querySelectorAll('.priority-options button').forEach(x=>x.classList.toggle('active',x===b))});
-  document.getElementById('itemForm').onsubmit=e=>{e.preventDefault();const reminderStart=document.getElementById('reminderStart').value,reminderEnd=document.getElementById('reminderEnd').value;if(reminderStart&&reminderEnd&&reminderEnd<reminderStart){toast('提醒結束時間需晚於開始時間');return}items.push({id:crypto.randomUUID?crypto.randomUUID():String(Date.now()),title:document.getElementById('titleInput').value.trim(),kind:selectedType,date:document.getElementById('dateInput').value,time:selectedType==='event'?document.getElementById('timeInput').value:'',priority:selectedPriority,reminderStart:document.getElementById('reminderStart').value,reminderEnd:document.getElementById('reminderEnd').value,done:false});save();render();close('itemOverlay');toast('事項已新增，已加入你的安排')};
-  document.addEventListener('click',e=>{const card=e.target.closest('.item');if(!card)return;const item=items.find(x=>x.id===card.dataset.id);if(e.target.closest('.check')){item.done=!item.done;save();render();toast(item.done?'做得好，已完成！':'已重新加入待辦')}else if(e.target.closest('.item-menu')){if(confirm(`要刪除「${item.title}」嗎？`)){items=items.filter(x=>x.id!==item.id);save();render();toast('事項已刪除')}}});
+  document.getElementById('itemForm').onsubmit=e=>{e.preventDefault();const reminderStart=document.getElementById('reminderStart').value,reminderEnd=document.getElementById('reminderEnd').value;if(reminderStart&&reminderEnd&&reminderEnd<reminderStart){toast('提醒結束時間需晚於開始時間');return}items.push({id:crypto.randomUUID?crypto.randomUUID():String(Date.now()),title:document.getElementById('titleInput').value.trim(),kind:selectedType,date:document.getElementById('dateInput').value,time:selectedType==='event'?document.getElementById('timeInput').value:'',priority:selectedPriority,reminderStart:document.getElementById('reminderStart').value,reminderEnd:document.getElementById('reminderEnd').value,done:false});save();render();persistItems();close('itemOverlay');toast('事項已新增，已加入你的雲端安排')};
+  document.addEventListener('click',e=>{const card=e.target.closest('.item');if(!card)return;const item=items.find(x=>x.id===card.dataset.id);if(e.target.closest('.check')){item.done=!item.done;save();render();persistItems();toast(item.done?'做得好，已完成！':'已重新加入待辦')}else if(e.target.closest('.item-menu')){if(confirm(`要刪除「${item.title}」嗎？`)){items=items.filter(x=>x.id!==item.id);save();render();persistItems();toast('事項已刪除')}}});
   document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{activeView=b.dataset.view;document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x===b));render()});
   document.getElementById('viewOverdue').onclick=()=>{activeView='today';document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.dataset.view==='today'));document.getElementById('secondaryHeading').scrollIntoView({behavior:'smooth',block:'center'})};
   document.getElementById('nextWeek').onclick=()=>{weekOffset=(weekOffset+1)%3;renderCalendar()};
@@ -87,12 +88,13 @@
   function showSettings(){document.getElementById('weeklyToggle').checked=settings.weekly;document.getElementById('defaultReminder').value=settings.defaultTime;open('settingsOverlay')}
   document.getElementById('notifyBtn').onclick=showSettings;document.getElementById('settingsLink').onclick=showSettings;document.getElementById('saveSettings').onclick=()=>{settings={weekly:document.getElementById('weeklyToggle').checked,defaultTime:document.getElementById('defaultReminder').value};localStorage.setItem('daywell-settings',JSON.stringify(settings));close('settingsOverlay');renderCalendar();toast('提醒偏好已儲存')};
   document.querySelectorAll('.close').forEach(b=>b.onclick=()=>close(b.dataset.close));document.querySelectorAll('.overlay').forEach(o=>o.onclick=e=>{if(e.target===o)close(o.id)});document.addEventListener('keydown',e=>{if(e.key==='Escape')document.querySelectorAll('.overlay.open').forEach(o=>close(o.id))});
-  initializeDate();render();
+  initializeDate();
 })();
 </script>
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
   import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
+  import { getFirestore, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
 
   // TODO: Replace with Firebase Console > Project settings > Your apps > SDK setup.
   const firebaseConfig = {
@@ -106,6 +108,33 @@
   };
   const app = initializeApp(firebaseConfig);
   const auth = getAuth(app);
+  const db = getFirestore(app);
+  let currentUser = null;
+  let saveQueue = Promise.resolve();
+  const showSyncError = error => { console.error("Firestore sync failed:", error); document.getElementById("loginError").textContent = "雲端同步失敗，請確認 Firestore 已建立且安全性規則允許登入者存取。"; };
+  persistItems = () => {
+    if (!currentUser) return Promise.resolve();
+    const payload = JSON.parse(JSON.stringify(items));
+    const ref = doc(db, "users", currentUser.uid);
+    saveQueue = saveQueue.catch(() => {}).then(() => setDoc(ref, { items: payload }, { merge: true }));
+    saveQueue.catch(showSyncError);
+    return saveQueue;
+  };
+  const loadItems = async user => {
+    currentUser = user;
+    if (!user) return;
+    try {
+      const snapshot = await getDoc(doc(db, "users", user.uid));
+      if (snapshot.exists() && Array.isArray(snapshot.data().items)) {
+        items = snapshot.data().items;
+      } else {
+        const legacy = localStorage.getItem("daywell-items");
+        if (legacy) { try { items = JSON.parse(legacy); } catch { items = sample; } }
+        await persistItems();
+      }
+      render();
+    } catch (error) { showSyncError(error); items = []; render(); }
+  };
   const provider = new GoogleAuthProvider();
   const loginButton = document.getElementById("googleLogin");
   const userProfile = document.getElementById("userProfile");
@@ -113,6 +142,7 @@
   const gateLogin = document.getElementById("gateLogin");
   const loginError = document.getElementById("loginError");
   const avatar = document.getElementById("userAvatar");
+  document.getElementById("mainApp").style.visibility = "hidden";
   async function startGoogleSignIn() {
     loginButton.disabled = true;
     gateLogin.disabled = true;
@@ -127,7 +157,7 @@
     try { await signOut(auth); }
     catch (error) { console.error("Sign-out failed:", error); alert("登出失敗，請稍後再試。"); }
   });
-  onAuthStateChanged(auth, user => {
+  onAuthStateChanged(auth, async user => {
     document.body.classList.remove("auth-pending");
     document.getElementById("mainApp").classList.toggle("auth-locked", !user);
     document.body.classList.toggle("auth-required", !user);
@@ -140,11 +170,18 @@
       avatar.textContent = name.trim().charAt(0).toUpperCase();
       avatar.setAttribute("aria-label", name);
       avatar.title = name;
+      document.getElementById("mainApp").style.visibility = "hidden";
+      await loadItems(user);
+      document.getElementById("mainApp").style.visibility = "visible";
     } else {
       document.getElementById("userName").textContent = "";
       avatar.textContent = "訪客";
       avatar.setAttribute("aria-label", "訪客");
       avatar.title = "訪客";
+      currentUser = null;
+      items = [];
+      document.getElementById("mainApp").style.visibility = "hidden";
+      items = [];
     }
   });
 </script>
